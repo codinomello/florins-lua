@@ -1,5 +1,3 @@
---- florins: löve2D ---
-
 --[[ 
     alt + l (rodar o jogo)
     w, a, s, d (movimento)
@@ -8,14 +6,21 @@
     m (música)
 ]]
 
--- função para adicionar florins no cenário
-
+-- dependências internas
 local add = require("add")
 local rem = require("rem")
+local input = require("input")
+local sound = require("sound")
+local map = require("map")
+
+-- libraries externas
+local anim8 = require("libraries/anim8")
+local hump = require("libraries/hump")
 
 --- inicialização ---
 function love.load()
-    love.window.setTitle("florins")
+    -- configurações iniciais
+    love.window.setTitle("Florins")
     love.window.setMode(800, 600)
 
     -- carrega a fonte rubik
@@ -23,37 +28,48 @@ function love.load()
 
     -- variáveis do fundo
     background = love.graphics.newImage("assets/background/background.png")
+
+    -- câmera
+    --camera = camera()
     
     -- sons
-    sounds = {}
-    --sounds.blip = love.audio.newSource("assets/sounds/blip.wav", "static")
-    sounds.music = love.audio.newSource("music/Pikmin - The Forest of Hope.mp3", "stream")
-    sounds.music:setLooping(true)
-    sounds.music:play(false)
+    sound.load()
     
+    -- ponto de entrega
+    delivery_point = {x = 400, y = 300}
+
     -- jogador
-    player = {x = 400, y = 300, speed = 200}
+    player = {}
+    player.x = 400
+    player.y = 300
+    player.speed = 200
+    player.image = love.graphics.newImage("assets/player/player.png")
 
     -- variável para armazenar o estado do apito
     whistle_active = false
 
-    -- variáveis dos florins
+    -- florins
     florins = {}
-    florim_count = 5
-    florim_spacing = 30 -- espaçamento entre os florins
-    florim_thrown = {}  -- lista de florins arremessados
+    florins_trown = {}   -- lista de florins arremessados
+    florins.spacing = 50 -- espaçamento entre os florins
+    florins.count = 5
 
-    -- variáveis dos objetos no cenário
+    -- objetos (x, y hp)
     objects = {}
 
-    -- adiciona florins
-    for i = 1, florim_count do
+    add.object(500, 300, 100)
+    add.object(600, 400, 50)
+
+    -- adiciona itens (não implementado)
+    items = {}
+
+    add.item(100, 150, false)
+    add.item(200, 200, false)
+
+    -- adiciona florins ao bando
+    for i = 1, florins.count do
         add.florim(player.x + math.random(-50, 50), player.y + math.random(-50, 50))
     end
-
-    -- adiciona objetos com HP
-    add.object(500, 300, 50)
-    add.object(600, 400, 80)
 end
 
 --- atualização ---
@@ -65,33 +81,61 @@ function love.update(dt)
     if love.keyboard.isDown("right") or love.keyboard.isDown("d") then player.x = player.x + player.speed * dt end
 
     -- movimento dos florins (seguem o líder quando não estão arremessados)
-    for i, florim in ipairs(florins) do
+    for _, florim in ipairs(florins) do
         if florim.state == "idle" then
-            local target_x, target_y
-  
-            if i == 1 then
-                -- o primeiro florim segue diretamente o jogador
-                target_x, target_y = player.x, player.y
-            else
-                -- os outros florins seguem o florim à frente
-                target_x, target_y = florins[i - 1].x, florins[i - 1].y
-            end
-  
-            -- calcula a distância para o alvo
-            local dx = target_x - florim.x
-            local dy = target_y - florim.y
+            local dx = player.x - florim.x
+            local dy = player.y - florim.y
             local distance = math.sqrt(dx^2 + dy^2)
-  
-            -- move o florim apenas se estiver longe demais do alvo
-            if distance > florim_spacing then
+
+            -- move o florim apenas se estiver fora do espaçamento
+            if distance > florins.spacing then
                 florim.x = florim.x + (dx / distance) * florim.speed * dt
                 florim.y = florim.y + (dy / distance) * florim.speed * dt
+            end
+
+            -- separação entre florins (evita sobreposição)
+            local florin_separation = 25
+            for _, other in ipairs(florins) do
+                if florim ~= other then
+                    local dx = florim.x - other.x
+                    local dy = florim.y - other.y
+                    local distance = math.sqrt(dx^2 + dy^2)
+
+                    if distance < florin_separation then
+                        florim.x = florim.x + (dx / distance) * florin_separation * dt
+                        florim.y = florim.y + (dy / distance) * florin_separation * dt
+                    end
+                end
+            end
+
+            -- verifica se o florim pode pegar um item
+            if not florim.carrying then
+                for _, item in ipairs(items) do
+                    local item_dx = item.x - florim.x
+                    local item_dy = item.y - florim.y
+                    local item_distance = math.sqrt(item_dx^2 + item_dy^2)
+
+                    if item_distance < 10 and not item.picked then
+                        item.picked = true
+                        florim.carrying = item
+                        break
+                    end
+                end
+            else
+                -- verifica se o florim chegou ao ponto de entrega
+                local delivery_dx = delivery_point.x - florim.x
+                local delivery_dy = delivery_point.y - florim.y
+                local delivery_distance = math.sqrt(delivery_dx^2 + delivery_dy^2)
+
+                if delivery_distance < 10 then
+                    florim.carrying = nil
+                end
             end
         end
     end
 
     -- movimento dos florins arremessados
-    for _, florim in ipairs(florim_thrown) do
+    for _, florim in ipairs(florins_trown) do
         local dx = florim.target.x - florim.x
         local dy = florim.target.y - florim.y
         local distance = math.sqrt(dx^2 + dy^2)
@@ -132,69 +176,66 @@ end
 function love.draw()
     -- define a fonte rubik
     love.graphics.setFont(font_rubik)
+    
+    -- fundo
+    love.graphics.draw(background, 0, 0)
 
+    -- câmera
+    -- camera:attach(0, 0, 800, 600)
+    
     -- desenha o líder
     love.graphics.setColor(1, 1, 0)
     love.graphics.circle("fill", player.x, player.y, 20)
+    --love.graphics.draw(player.image, player.x, player.y)
     
     -- desenha os florins
     for _, florim in ipairs(florins) do
-        love.graphics.setColor(0, 0, 1)
+        love.graphics.setColor(florim.color)
         love.graphics.circle("fill", florim.x, florim.y, 10)
+
+        -- desenha o item carregado pelo florim, se houver
+        if florim.carrying then
+            love.graphics.setColor(1, 0, 0)
+            love.graphics.rectangle("fill", florim.x - 5, florim.y - 15, 10, 10)
+        end
     end
     
     -- desenha os florins arremessados
-    for _, florim in ipairs(florim_thrown) do
-        love.graphics.setColor(0.5, 0.5, 1)
+    for _, florim in ipairs(florins_trown) do
+        love.graphics.setColor(florim.color)
         love.graphics.circle("fill", florim.x, florim.y, 10)
     end
     
-    -- desenha os objetos com HP
-    for _, obj in ipairs(objects) do
+    -- desenha os objetos com hp
+    for _, object in ipairs(objects) do
         love.graphics.setColor(1, 0, 0)
-        love.graphics.circle("fill", obj.x, obj.y, obj.radius)
+        love.graphics.circle("fill", object.x, object.y, object.radius)
         love.graphics.setColor(1, 1, 1)
-        love.graphics.print("HP: " .. obj.hp, obj.x - 20, obj.y - 40)
+        love.graphics.print("HP: " .. object.hp, object.x - 22, object.y - 50)
     end
 
-    -- fundo
-    --love.graphics.draw(background, 0, 0)
+    -- desenha os itens
+    for _, item in ipairs(items) do
+        if not item.picked then
+            love.graphics.setColor(1, 0, 1)
+            love.graphics.rectangle("fill", item.x, item.y, 10, 10)
+        end
+    end
+
+    -- desenha o ponto de entrega
+    love.graphics.setColor(0, 0, 1)
+    love.graphics.rectangle("fill", delivery_point.x, delivery_point.y, 20, 20)
+
+    -- cor final (branco)
+    love.graphics.setColor(1, 1, 1)
 end
 
 --- input (pressionado) ---
 function love.keypressed(key)
-    if key == "space" and #florins > 0 then
-        -- verifica se há objetos disponíveis
-        if #objects > 0 then
-            -- remove o primeiro florim da lista principal
-            local florim = table.remove(florins, 1)
-  
-            -- define o alvo mais próximo (ou o primeiro da lista, dependendo da lógica)
-            florim.target = objects[1] -- Pode melhorar com a lógica de "alvo mais próximo"
-            florim.state = "thrown"
-
-            -- adiciona o florim à lista de arremessados
-            table.insert(florim_thrown, florim)
-        end
-    elseif key == "q" then
-        -- ativa o apito
-        whistle_active = true
-    end
-
-    -- controle da música
-    if key == "m" then
-        if sounds.music:isPlaying() then
-            sounds.music:pause()
-        else
-            sounds.music:play()
-        end
-    end
+    input.keys(key)
 end
 
---- input (solto) ---
+--- output (solto) ---
 function love.keyreleased(key)
-    if key == "q" then
-        -- desativa o apito
-        whistle_active = false
-    end
+    output.keys(key)
 end

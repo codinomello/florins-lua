@@ -2,9 +2,9 @@ local rem = {}
 
 -- função para remover os florins arremessados que voltaram ao estado "idle"
 function rem.florim()
-    for i = #florim_thrown, 1, -1 do
-        if florim_thrown[i].state == "idle" then
-            table.remove(florim_thrown, i)
+    for i = #florins_trown, 1, -1 do
+        if florins_trown[i].state == "idle" then
+            table.remove(florins_trown, i)
         end
     end
 end
